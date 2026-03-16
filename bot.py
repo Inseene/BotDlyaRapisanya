@@ -1,5 +1,3 @@
-import os
-TOKEN = os.environ.get('BOT_TOKEN')
 import asyncio
 import logging
 import os
@@ -17,6 +15,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+
+# ==========================================================
+# ВСТАВЬ СЮДА ТОКЕН ОТ @BotFather
+# ==========================================================
+TOKEN = "8615286189:AAGxCbav0Yw8Q6C4ZoWVgcgg56yeyRDayNI"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger("school_schedule_bot")
@@ -1008,7 +1011,8 @@ async def adm_sch_add_class_do(message: types.Message, state: FSMContext):
 
     await state.clear()
     await message.answer("✅ Класс добавлен.", reply_markup=get_main_keyboard())
-    # Возвращаем админа к списку классов этой параллели
+    
+    # Исправлено: показываем обновлённый список классов для этой параллели
     await message.answer(
         f"📚 Расписание: выбери класс ({PARALLEL_EMOJI.get(grade, grade)})",
         reply_markup=admin_schedule_classes_keyboard(grade),

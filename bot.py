@@ -15,8 +15,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
 
 # ==========================================================
 # ВСТАВЬ СЮДА ТОКЕН ОТ @BotFather
@@ -43,6 +41,7 @@ ADMIN_USER_ID = 6754275656
 DB_PATH = os.path.join(os.path.dirname(__file__), "data.sqlite3")
 
 def db_connect() -> sqlite3.Connection:
+    # Важно: один файл, простая БД, достаточно для школьного проекта
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -122,6 +121,7 @@ def db_init() -> None:
 
         cur = conn.execute("SELECT COUNT(*) AS c FROM classes")
         if int(cur.fetchone()["c"]) == 0:
+            # Пустые “настоящие” данные можно заполнить через админку
             seed = [
                 ("5", "5А"), ("5", "5Б"), ("5", "5В"), ("5", "5Г"),
                 ("6", "6А"), ("6", "6Б"), ("6", "6В"),
@@ -133,6 +133,7 @@ def db_init() -> None:
             ]
             conn.executemany("INSERT INTO classes(grade, class_name) VALUES (?, ?)", seed)
 
+        # Тексты разделов
         set_setting_if_empty(conn, "help_text", "❓ Помощь\n\nНажми «📚 Расписание уроков» и выбери класс.")
 
 def set_setting_if_empty(conn: sqlite3.Connection, key: str, value: str) -> None:
@@ -231,6 +232,7 @@ def get_schedule_for_today(class_name: str) -> tuple[str, Optional[list[str]]]:
 
 def normalize_class_name(s: str) -> str:
     s = (s or "").strip().upper().replace(" ", "")
+    # Частая путаница: латиница A/B/V вместо русских А/Б/В
     s = s.replace("A", "А").replace("B", "Б").replace("V", "В").replace("G", "Г")
     return s
 
@@ -244,6 +246,7 @@ PARALLEL_EMOJI: dict[str, str] = {
     "11": "1️⃣1️⃣",
 }
 
+# Дни недели в админке (и в расписании)
 RU_DAYS = ["понедельник", "вторник", "среда", "четверг", "пятница"]
 
 # ==========================================================
@@ -251,7 +254,7 @@ RU_DAYS = ["понедельник", "вторник", "среда", "четве
 # ==========================================================
 
 class AdminStates(StatesGroup):
-    editing_announcements = State()
+    editing_announcements = State()  # заголовок объявления
     editing_announcement_body = State()
     editing_help = State()
     adding_menu_button = State()
@@ -262,6 +265,7 @@ class AdminStates(StatesGroup):
     schedule_set_lessons = State()
 
 def is_admin(message: types.Message) -> bool:
+    # “Сложный доступ” у тебя сейчас выбран как allowlist + только личка
     return (
         message.chat.type == "private"
         and ADMIN_USER_ID != 0
@@ -307,6 +311,7 @@ def list_menu_buttons() -> list[sqlite3.Row]:
         ).fetchall()
 
 def buttons_picker(action: str) -> types.InlineKeyboardMarkup:
+    # action: toggle|del|rename
     rows = list_menu_buttons()
     b = InlineKeyboardBuilder()
     for r in rows:
@@ -382,6 +387,7 @@ def get_main_keyboard():
     buttons = get_menu_buttons()
     for b in buttons:
         builder.add(KeyboardButton(text=b))
+    # Авто-раскладка: 2 в ряд, чтобы выглядело аккуратно
     if len(buttons) <= 2:
         builder.adjust(2)
     else:
@@ -425,11 +431,13 @@ def announcements_keyboard() -> types.InlineKeyboardMarkup:
     return kb.as_markup()
 
 def get_classes_keyboard(grade: str) -> types.InlineKeyboardMarkup:
+    # Список классов берём из БД (редактируется через админку)
     classes = get_classes_for_grade(grade)
     builder = InlineKeyboardBuilder()
     for cls in classes:
         builder.add(InlineKeyboardButton(text=cls, callback_data=f"cls|{cls}|{grade}"))
 
+    # Аккуратная сетка: 4 в ряд, иначе 3
     if len(classes) >= 4:
         builder.adjust(4)
     else:
@@ -446,6 +454,8 @@ def get_classes_keyboard(grade: str) -> types.InlineKeyboardMarkup:
 # ==========================================================
 
 def get_today_ru() -> str:
+    # Определение дня недели через datetime (как в требовании)
+    # Monday=0 ... Sunday=6
     ru_days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
     return ru_days[datetime.now().weekday()]
 
@@ -456,6 +466,7 @@ def format_schedule_for_today(class_name: str) -> str:
     if lessons is None:
         return f"📚 {class_name}\n🗓️ Сегодня: {today.title()}\n\nРасписание пока не добавлено."
 
+    # Если админ сохранил один маркер "__OFF__" — считаем выходной
     if len(lessons) == 1 and lessons[0] == "__OFF__":
         return f"📚 {class_name}\n🗓️ Сегодня: {today.title()}\n\nВыходной."
 
@@ -469,14 +480,9 @@ def get_schedule_result_keyboard(grade: str) -> types.InlineKeyboardMarkup:
     )
     return builder.as_markup()
 
-# ==========================================================
-# ОБРАБОТЧИКИ КОМАНД
-# ==========================================================
-
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     try:
-        add_subscriber(message.chat.id)
         await message.answer(
             f"👋 Привет, {message.from_user.full_name}!\n\n"
             "Я бот школьного расписания.\n"
@@ -496,6 +502,7 @@ async def cmd_admin(message: types.Message, state: FSMContext):
 
 @router.message(Command("myid"))
 async def cmd_myid(message: types.Message):
+    # Команда полезна, чтобы узнать свой user_id для админки
     uid = message.from_user.id if message.from_user else None
     await message.answer(f"Твой user_id: {uid}")
 
@@ -535,11 +542,14 @@ async def menu_help_button(message: types.Message):
 
 @router.message(StateFilter(None))
 async def fallback_text(message: types.Message):
+    # Подписываем все чаты на объявления
     try:
         add_subscriber(message.chat.id)
     except Exception:
         logger.exception("Ошибка при добавлении подписчика")
 
+    # Динамические кнопки главного меню из БД:
+    # известные разделы обрабатываем, остальные — нейтрально.
     text = (message.text or "").strip()
     if text == "📚 Расписание уроков":
         return await menu_schedule(message)
@@ -552,10 +562,12 @@ async def fallback_text(message: types.Message):
         await message.answer("Пока для этой кнопки нет действия.", reply_markup=get_main_keyboard())
     except Exception:
         logger.exception("Ошибка в fallback обработчике")
-
-# ==========================================================
-# INLINE-НАВИГАЦИЯ
-# ==========================================================
+        await message.answer(
+            get_setting("announcements_text", "📢 Объявления\n\nПока объявлений нет."),
+            reply_markup=get_main_keyboard(),
+        )
+    except Exception:
+        logger.exception("Ошибка в разделе объявлений")
 
 @router.callback_query(F.data.startswith("ann|"))
 async def show_announcement(callback: types.CallbackQuery):
@@ -577,9 +589,14 @@ async def show_announcement(callback: types.CallbackQuery):
         )
     await callback.answer()
 
+# ==========================================================
+# INLINE-НАВИГАЦИЯ (callback кнопки)
+# ==========================================================
+
 @router.callback_query(F.data == "nav|main")
 async def nav_main(callback: types.CallbackQuery):
     try:
+        # Удаляем inline-сообщение (чтобы не захламляло), а меню остаётся reply-кнопками снизу
         if callback.message:
             await callback.message.delete()
         await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard())
@@ -639,6 +656,7 @@ async def choose_parallel(callback: types.CallbackQuery):
 async def choose_class(callback: types.CallbackQuery):
     try:
         parts = callback.data.split("|")
+        # Ожидаем: cls|5А|5
         if len(parts) < 3:
             await callback.message.edit_text(
                 "Ошибка: класс не распознан.",
@@ -649,6 +667,7 @@ async def choose_class(callback: types.CallbackQuery):
         class_name = parts[1]
         grade = parts[2]
 
+        # Защита: если класса нет в списке параллели — всё равно покажем понятную ошибку
         if len(get_classes_for_grade(grade)) == 0:
             await callback.message.edit_text(
                 "Ошибка: параллель не найдена.",
@@ -721,6 +740,7 @@ async def adm_menu_add_text(message: types.Message, state: FSMContext):
         return await message.answer("Пустой текст. Напиши ещё раз.")
 
     with closing(db_connect()) as conn, conn:
+        # position: в конец
         cur = conn.execute("SELECT COALESCE(MAX(position), 0) AS p FROM menu_buttons")
         pos = int(cur.fetchone()["p"]) + 10
         conn.execute("INSERT INTO menu_buttons(text, enabled, position) VALUES (?, 1, ?)", (text, pos))
@@ -842,6 +862,7 @@ async def adm_ann_body_set(message: types.Message, state: FSMContext, bot: Bot):
     if not body:
         return await message.answer("Текст объявления не может быть пустым. Напиши ещё раз.")
     add_announcement(title, body)
+    # Рассылаем уведомление всем подписчикам
     note = f"📢 Новое объявление: «{title}»"
     for chat_id in get_subscribers():
         try:
@@ -927,6 +948,7 @@ async def adm_classes_set(message: types.Message, state: FSMContext):
         await state.clear()
         return await message.answer("Ошибка данных. Открой /admin заново.")
 
+    # Парсим список: "5А,5Б, 5В" -> ["5А","5Б","5В"]
     parts = [normalize_class_name(p) for p in re.split(r"[,\n;]+", raw) if p.strip()]
 
     with closing(db_connect()) as conn, conn:
@@ -977,6 +999,7 @@ async def adm_sch_add_class_do(message: types.Message, state: FSMContext):
     if not grade or not cls:
         return await message.answer(f"Не понял. Напиши класс, например: {grade}А")
 
+    # Простая проверка: класс должен начинаться с номера параллели
     if not cls.startswith(grade):
         return await message.answer(f"Класс должен начинаться с {grade}. Пример: {grade}А")
 
@@ -988,6 +1011,8 @@ async def adm_sch_add_class_do(message: types.Message, state: FSMContext):
 
     await state.clear()
     await message.answer("✅ Класс добавлен.", reply_markup=get_main_keyboard())
+    
+    # Исправлено: показываем обновлённый список классов для этой параллели
     await message.answer(
         f"📚 Расписание: выбери класс ({PARALLEL_EMOJI.get(grade, grade)})",
         reply_markup=admin_schedule_classes_keyboard(grade),
@@ -998,6 +1023,7 @@ async def adm_sch_choose_class(callback: types.CallbackQuery, state: FSMContext)
     if not is_admin_cb(callback):
         return await callback.answer()
     parts = callback.data.split("|")
+    # adm|schsel|cls|5А|5
     class_name = normalize_class_name(parts[3])
     grade = parts[4]
     await state.clear()
@@ -1011,6 +1037,7 @@ async def adm_sch_choose_class(callback: types.CallbackQuery, state: FSMContext)
 async def adm_sch_choose_day(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin_cb(callback):
         return await callback.answer()
+    # adm|sch|day|5А|5|понедельник
     parts = callback.data.split("|")
     class_name = normalize_class_name(parts[3])
     grade = parts[4]
@@ -1033,6 +1060,7 @@ async def adm_sch_delete_class(callback: types.CallbackQuery, state: FSMContext)
     if not is_admin_cb(callback):
         return await callback.answer()
     parts = callback.data.split("|")
+    # adm|sch|delcls|5А|5
     class_name = normalize_class_name(parts[3])
     grade = parts[4]
     with closing(db_connect()) as conn, conn:
@@ -1065,6 +1093,7 @@ async def adm_sch_set_lessons(message: types.Message, state: FSMContext):
         return await message.answer("Ошибка данных. Открой /admin заново.")
 
     if len(lessons) == 0:
+        # Пустой список = “не добавлено”
         set_schedule_for_day(class_name, day, [])
         await state.clear()
         return await message.answer("✅ Очищено (теперь будет «Расписание пока не добавлено»).", reply_markup=get_main_keyboard())
@@ -1074,78 +1103,27 @@ async def adm_sch_set_lessons(message: types.Message, state: FSMContext):
     await message.answer(f"✅ Сохранено: {class_name}, {day.title()}.", reply_markup=get_main_keyboard())
     await message.answer("📚 Выбери параллель для дальнейшего редактирования:", reply_markup=admin_classes_keyboard("adm|schsel"))
 
-# ==========================================================
-# ВЕБХУК И ЗАПУСК (НОВАЯ ЧАСТЬ)
-# ==========================================================
-
-async def on_startup(bot: Bot, base_url: str):
-    """Действия при запуске вебхука"""
-    # Инициализируем БД
-    db_init()
-    
-    # Устанавливаем вебхук
-    webhook_url = f"{base_url}/webhook"
-    await bot.set_webhook(
-        webhook_url,
-        drop_pending_updates=True,
-        allowed_updates=["message", "callback_query"]
-    )
-    logger.info(f"Вебхук установлен на {webhook_url}")
-
-async def on_shutdown(bot: Bot):
-    """Действия при остановке"""
-    # Удаляем вебхук
-    await bot.delete_webhook()
-    # Закрываем сессию бота
-    await bot.close()
-    logger.info("Бот остановлен, вебхук удален")
-
-async def init_app() -> web.Application:
-    """Создание и настройка aiohttp приложения"""
-    
-    # Проверяем токен
+async def main():
+    # Создаем объекты бота и диспетчера
     if not TOKEN or TOKEN == "PASTE_YOUR_TOKEN_HERE":
         raise RuntimeError("Вставь токен в переменную TOKEN в файле bot.py")
-    
-    # Создаем бота
-    bot = Bot(token=TOKEN)
+
+    # Если Telegram на твоём ПК доступен только через VPN/прокси,
+    # можно указать прокси через переменную окружения TG_PROXY.
+    # Примеры:
+    # setx TG_PROXY "http://127.0.0.1:8080"
+    # setx TG_PROXY "socks5://127.0.0.1:1080"
+    proxy = os.getenv("TG_PROXY")
+    session = AiohttpSession(proxy=proxy) if proxy else None
+
+    db_init()
+
+    bot = Bot(token=TOKEN, session=session) if session else Bot(token=TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
-    
-    # Создаем aiohttp приложение
-    app = web.Application()
-    
-    # Настраиваем вебхук
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-    )
-    
-    # Регистрируем обработчик вебхука
-    webhook_requests_handler.register(app, path="/webhook")
-    
-    # Настраиваем startup и shutdown
-    app.on_startup.append(lambda app: on_startup(bot, get_webhook_base_url()))
-    app.on_shutdown.append(lambda app: on_shutdown(bot))
-    
-    return app
 
-def get_webhook_base_url() -> str:
-    """Получаем базовый URL из переменных окружения Render"""
-    # Render автоматически устанавливает переменную RENDER_EXTERNAL_URL
-    base_url = os.environ.get("RENDER_EXTERNAL_URL")
-    if not base_url:
-        # Для локального тестирования
-        base_url = os.environ.get("WEBHOOK_HOST", "http://localhost:8080")
-    return base_url.rstrip("/")
+    logger.info("Бот запущен. Нажми Ctrl+C для остановки.")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    # Запускаем aiohttp сервер
-    port = int(os.environ.get("PORT", 8080))
-    
-    # Создаем и запускаем приложение
-    web.run_app(
-        init_app(),
-        host="0.0.0.0",
-        port=port
-        )
+    asyncio.run(main())

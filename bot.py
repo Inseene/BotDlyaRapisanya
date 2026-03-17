@@ -30,7 +30,7 @@ TOKEN = "8615286189:AAGxCbav0Yw8Q6C4ZoWVgcgg56yeyRDayNI"
 # ==========================================================
 # ЗАМЕНИТЕ на URL вашего приложения на Render
 # Например: https://school-bot.onrender.com
-RENDER_URL = "https://your-app-name.onrender.com"  # ИЗМЕНИТЕ ЭТО!
+RENDER_URL = "https://school-botbeta.onrender.com/"  # ИЗМЕНИТЕ ЭТО!
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = RENDER_URL + WEBHOOK_PATH
 
